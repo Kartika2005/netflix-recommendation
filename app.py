@@ -40,6 +40,32 @@ def load_data() -> pd.DataFrame:
           .str.replace(" Season.*", "", regex=True)
           .astype(float)
     )
+    
+    # Advanced Feature Engineering: Time to Netflix
+    df['time_to_netflix'] = df['year_added'] - df['release_year']
+    
+    # Target Audience Categorization
+    def categorize_audience(rating):
+        kids = ['TV-Y', 'TV-Y7', 'G', 'TV-G', 'PG', 'TV-Y7-FV']
+        teens = ['TV-14', 'PG-13']
+        adults = ['TV-MA', 'R', 'NC-17', 'UR', 'NR']
+        if rating in kids:
+            return 'Kids'
+        elif rating in teens:
+            return 'Teens'
+        elif rating in adults:
+            return 'Adults'
+        else:
+            return 'Unknown'
+            
+    df['target_audience'] = df['rating'].apply(categorize_audience)
+    
+    # Smart Missing Data Imputation: Impute Country by Director
+    df['country'] = df['country'].replace('Unknown', None) # Temporarily revert
+    director_country_map = df.dropna(subset=['director', 'country']).groupby('director')['country'].agg(lambda x: pd.Series.mode(x)[0]).to_dict()
+    df.loc[df['country'].isnull() & df['director'].notnull(), 'country'] = df['director'].map(director_country_map)
+    df['country'] = df['country'].fillna('Unknown') # Fill remaining
+    
     return df
 
 
@@ -203,6 +229,29 @@ with r3c2:
         ax.text(v + 0.1, i, str(v), va="center", fontsize=9)
     plt.tight_layout()
     show_fig(fig)
+
+st.divider()
+
+st.subheader("Target Audience & Addition Trends")
+r35c1, r35c2 = st.columns(2)
+
+with r35c1:
+    audience_counts = filtered["target_audience"].value_counts()
+    fig, ax = plt.subplots(figsize=(6, 4))
+    ax.pie(audience_counts.values, labels=audience_counts.index, autopct="%1.1f%%", colors=sns.color_palette("pastel"), startangle=90)
+    ax.set_title("Target Audience Distribution")
+    show_fig(fig)
+
+with r35c2:
+    if not filtered["time_to_netflix"].dropna().empty:
+        fig, ax = plt.subplots(figsize=(6, 4))
+        sns.histplot(filtered["time_to_netflix"].dropna(), bins=20, kde=True, ax=ax, color="#E50914")
+        ax.set_title("Time Gap: Release to Netflix Addition")
+        ax.set_xlabel("Years")
+        ax.set_ylabel("Count")
+        show_fig(fig)
+    else:
+        st.info("No time gap data available.")
 
 st.divider()
 
