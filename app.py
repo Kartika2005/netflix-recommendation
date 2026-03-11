@@ -5,6 +5,8 @@ import seaborn as sns
 import streamlit as st
 from pathlib import Path
 
+from recommender import build_feature_matrix, get_recommendations, save_history, load_history
+
 
 st.set_page_config(
     page_title="Netflix EDA",
@@ -303,3 +305,72 @@ if search_term:
 st.dataframe(table_df.reset_index(drop=True), use_container_width=True, height=350)
 
 st.caption("Data source: netflix_titles.csv")
+
+# ──────────────────────────────────────────────────────────────
+# ML-Based Recommendation System
+# ──────────────────────────────────────────────────────────────
+
+st.divider()
+st.title("Personalised Recommendations")
+st.markdown(
+    "Select the movies / TV shows you have already watched (or liked) "
+    "and the recommendation engine will suggest similar titles from the catalogue."
+)
+
+# Build the TF-IDF matrix once and cache it
+@st.cache_resource
+def _cached_tfidf(_df):
+    return build_feature_matrix(_df)
+
+tfidf_matrix, _vectorizer = _cached_tfidf(df)
+
+# Load any previously saved watch history
+all_titles_sorted = sorted(df["title"].unique().tolist())
+saved_history = load_history()
+
+# Sidebar-like controls inside main area
+rec_col1, rec_col2 = st.columns([3, 1])
+
+with rec_col1:
+    watched = st.multiselect(
+        "🎬 Your Watch History",
+        options=all_titles_sorted,
+        default=[t for t in saved_history if t in all_titles_sorted],
+        help="Search and select titles you have watched or liked.",
+    )
+
+with rec_col2:
+    num_recs = st.slider("How many recommendations?", min_value=5, max_value=30, value=10)
+
+# Persist history whenever the selection changes
+if watched != saved_history:
+    save_history(watched)
+
+if st.button("Get Recommendations", type="primary"):
+    if not watched:
+        st.warning("Please select at least one title from your watch history.")
+    else:
+        with st.spinner("Crunching numbers…"):
+            recs = get_recommendations(df, tfidf_matrix, watched, n=num_recs)
+
+        if recs.empty:
+            st.info("No recommendations found — try adding more titles to your history.")
+        else:
+            st.success(f"Top {len(recs)} recommendations based on your history:")
+
+            # Nicely formatted table
+            display_recs = recs.rename(columns={
+                "title": "Title",
+                "type": "Type",
+                "listed_in": "Genres",
+                "rating": "Rating",
+                "release_year": "Year",
+                "description": "Description",
+                "score": "Similarity",
+            })
+            # Truncate long descriptions for readability
+            display_recs["Description"] = display_recs["Description"].str[:120] + "…"
+            display_recs["Similarity"] = display_recs["Similarity"].apply(lambda s: f"{s:.3f}")
+            display_recs.index = range(1, len(display_recs) + 1)
+
+            st.dataframe(display_recs, use_container_width=True, height=450)
